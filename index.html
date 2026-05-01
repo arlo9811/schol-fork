@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<!-- v2.8 -->
+<!-- v3.0 -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="version" content="v2.8">
+<meta name="version" content="v3.0">
 <title>Scholia — Academic Editor</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='10' fill='%23221c17'/><path d='M44 12 L52 20 L26 46 L18 46 L18 38 Z' fill='%23c9a86a'/></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1618,13 +1618,77 @@ function autoConvertAroundCaret() {
 }
 
 /* ---------- Paste ---------- */
+function getSelectionSourceText() {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return '';
+  const range = sel.getRangeAt(0);
+  if (range.collapsed) return '';
+
+  const startLine = getLineDiv(range.startContainer);
+  const endLine = getLineDiv(range.endContainer);
+  if (!startLine || !endLine) return range.toString();
+
+  const lines = Array.from(editor.children);
+  const startIdx = lines.indexOf(startLine);
+  const endIdx = lines.indexOf(endLine);
+  if (startIdx < 0 || endIdx < 0) return range.toString();
+
+  const first = Math.min(startIdx, endIdx);
+  const last = Math.max(startIdx, endIdx);
+  const startOffset = getCaretOffsetInLine(startLine);
+  const savedRange = range.cloneRange();
+  const endRange = document.createRange();
+  endRange.setStart(savedRange.endContainer, savedRange.endOffset);
+  endRange.collapse(true);
+  const sel2 = window.getSelection();
+  sel2.removeAllRanges();
+  sel2.addRange(endRange);
+  const endOffset = getCaretOffsetInLine(endLine);
+  sel2.removeAllRanges();
+  sel2.addRange(savedRange);
+
+  if (first === last) {
+    const src = getLineSource(lines[first]);
+    return src.slice(startOffset, endOffset);
+  }
+
+  const out = [];
+  out.push(getLineSource(lines[first]).slice(startOffset));
+  for (let i = first + 1; i < last; i++) out.push(getLineSource(lines[i]));
+  out.push(getLineSource(lines[last]).slice(0, endOffset));
+  return out.join('\n');
+}
+
+editor.addEventListener('copy', (e) => {
+  const text = getSelectionSourceText();
+  if (!text) return;
+  e.preventDefault();
+  e.clipboardData.setData('application/x-scholia', text);
+  e.clipboardData.setData('text/plain', text);
+});
+
+editor.addEventListener('cut', (e) => {
+  const text = getSelectionSourceText();
+  if (!text) return;
+  e.preventDefault();
+  e.clipboardData.setData('application/x-scholia', text);
+  e.clipboardData.setData('text/plain', text);
+  flushTypingSnapshot();
+  deleteSelectionRange();
+  renderAll();
+  pushUndo();
+});
+
 editor.addEventListener('paste', (e) => {
   e.preventDefault();
   flushTypingSnapshot();
+  const scholiaText = e.clipboardData.getData('application/x-scholia');
   const html = e.clipboardData.getData('text/html');
   const text = e.clipboardData.getData('text/plain');
   let lines;
-  if (html) {
+  if (scholiaText) {
+    lines = scholiaText.split(/\r?\n/);
+  } else if (html) {
     const tmp = document.createElement('div');
     tmp.innerHTML = html;
     sanitizeForPaste(tmp);
